@@ -12,9 +12,9 @@ stdenv.mkDerivation rec {
   version = "0.0.1";
 
   src = fetchFromGitHub {
+rev = "64efc86e172128a79e73bb8673c38e51aee31ecc";
     owner = "kraiskil";
     repo = "onnx2c";
-    rev = "64efc86e172128a79e73bb8673c38e51aee31ecc";
     sha256 = "sha256-ALajneiJnmTsaNTEsVX5WtWZLvu5KuA0pBZqDY7PBG0=";
     fetchSubmodules = true;
   };

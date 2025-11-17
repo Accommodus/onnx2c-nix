@@ -1,0 +1,62 @@
+name: Update onnx2c revision
+
+on:
+  workflow_dispatch:
+
+jobs:
+  update-rev:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check upstream revision
+        id: rev-check
+        run: |
+          set -euo pipefail
+          current_rev=$(sed -n '15p' onnx2c-package.nix | grep -o '[0-9a-f]\{40\}')
+          if [ -z "$current_rev" ]; then
+            echo "Could not determine current revision from line 15." >&2
+            exit 1
+          fi
+
+          latest_rev=$(git ls-remote https://github.com/kraiskil/onnx2c HEAD | cut -f1)
+          if [ -z "$latest_rev" ]; then
+            echo "Could not determine latest upstream revision." >&2
+            exit 1
+          fi
+
+          echo "current_rev=$current_rev" >> "$GITHUB_OUTPUT"
+          echo "latest_rev=$latest_rev" >> "$GITHUB_OUTPUT"
+
+          if [ "$current_rev" = "$latest_rev" ]; then
+            echo "needs_update=false" >> "$GITHUB_OUTPUT"
+            echo "Upstream is already in sync."
+          else
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+            echo "Upstream revision differs; updating to $latest_rev."
+          fi
+
+      - name: Update revision line
+        if: steps.rev-check.outputs.needs_update == 'true'
+        run: |
+          set -euo pipefail
+          latest_rev="${{ steps.rev-check.outputs.latest_rev }}"
+          sed -i "15s|rev = \".*\";|rev = \"${latest_rev}\";|" onnx2c-package.nix
+
+      - name: Commit changes
+        if: steps.rev-check.outputs.needs_update == 'true'
+        run: |
+          set -euo pipefail
+          latest_rev="${{ steps.rev-check.outputs.latest_rev }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit onnx2c-package.nix -m "Update onnx2c rev to ${latest_rev}"
+
+      - name: Push changes
+        if: steps.rev-check.outputs.needs_update == 'true'
+        run: |
+          set -euo pipefail
+          git push origin HEAD:${{ github.ref_name }}
