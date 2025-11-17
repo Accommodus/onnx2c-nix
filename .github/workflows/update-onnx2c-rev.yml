@@ -3,6 +3,9 @@ name: Update onnx2c revision
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   update-rev:
     runs-on: ubuntu-latest
