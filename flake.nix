@@ -10,7 +10,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        onnx2c = pkgs.callPackage ./default.nix {
+        onnx2c = pkgs.callPackage ./onnx2c-package.nix {
           protobuf = pkgs.protobuf_21;
         };
       in
