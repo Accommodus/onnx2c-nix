@@ -42,12 +42,69 @@ jobs:
             echo "Upstream revision differs; updating to $latest_rev."
           fi
 
-      - name: Update revision line
+      - name: Install Nix (for hashing)
         if: steps.rev-check.outputs.needs_update == 'true'
+        uses: cachix/install-nix-action@v27
+
+      - name: Prefetch source and compute hash
+        if: steps.rev-check.outputs.needs_update == 'true'
+        id: source-hash
         run: |
           set -euo pipefail
           latest_rev="${{ steps.rev-check.outputs.latest_rev }}"
-          sed -i "15s|rev = \".*\";|rev = \"${latest_rev}\";|" onnx2c-package.nix
+          prefetch_json=$(mktemp)
+          nix-prefetch-git --quiet --fetch-submodules --rev "$latest_rev" https://github.com/kraiskil/onnx2c.git > "$prefetch_json"
+          hash_base32=$(
+            PREFETCH_JSON_PATH=$prefetch_json python - <<'PY'
+            import json
+            import os
+
+            path = os.environ["PREFETCH_JSON_PATH"]
+            with open(path) as fh:
+                data = json.load(fh)
+            hash_value = data.get("sha256")
+            if not hash_value:
+                raise SystemExit("sha256 missing in nix-prefetch-git output")
+            print(hash_value)
+            PY
+                      )
+                      if [ -z "$hash_base32" ] || [ "$hash_base32" = "null" ]; then
+                        echo "Failed to compute sha256 from nix-prefetch-git output." >&2
+                        exit 1
+                      fi
+                      hash_sri=$(nix hash to-sri --type sha256 --base32 "$hash_base32")
+                      rm -f "$prefetch_json"
+                      echo "sha256=$hash_sri" >> "$GITHUB_OUTPUT"
+
+                  - name: Update revision and sha256
+                    if: steps.rev-check.outputs.needs_update == 'true'
+                    env:
+                      LATEST_REV: ${{ steps.rev-check.outputs.latest_rev }}
+                      LATEST_SHA: ${{ steps.source-hash.outputs.sha256 }}
+                    run: |
+                      set -euo pipefail
+                      python - <<'PY'
+            import os
+            import re
+            from pathlib import Path
+
+            rev = os.environ["LATEST_REV"]
+            sha = os.environ["LATEST_SHA"]
+            path = Path("onnx2c-package.nix")
+            text = path.read_text()
+
+            rev_pattern = re.compile(r'^(?P<prefix>\s*rev = ")(?P<body>.*?)(?P<suffix>";)', re.MULTILINE)
+            text, rev_count = rev_pattern.subn(lambda m: f'{m.group("prefix")}{rev}{m.group("suffix")}', text, count=1)
+            if rev_count != 1:
+                raise SystemExit("Failed to update revision line")
+
+            sha_pattern = re.compile(r'^(?P<prefix>\s*sha256 = ")(?P<body>.*?)(?P<suffix>";)', re.MULTILINE)
+            text, sha_count = sha_pattern.subn(lambda m: f'{m.group("prefix")}{sha}{m.group("suffix")}', text, count=1)
+            if sha_count != 1:
+                raise SystemExit("Failed to update sha256 line")
+
+            path.write_text(text)
+            PY
 
       - name: Commit changes
         if: steps.rev-check.outputs.needs_update == 'true'
